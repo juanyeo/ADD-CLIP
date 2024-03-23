@@ -135,7 +135,6 @@ def main(args):
         det_image_size=args.det_image_size,
         dataset_type=args.dataset_type,
     )
-    guide_model = None
     args.input_size = model.visual.image_size
     if args.dataset_type in ['grid_distill', 'proposals_distill']:
         method = CLIPSelf()
@@ -156,8 +155,6 @@ def main(args):
             output_dict=True,
             cache_dir=args.cache_dir  # cache dir of pre-trained models
         )
-        guide_model = torch.hub.load('facebookresearch/dino:main', 'dino_vitb16')
-        guide_model.to(device)
 
     random_seed(args.seed, args.rank)
 
@@ -193,8 +190,6 @@ def main(args):
             method = torch.nn.parallel.DistributedDataParallel(method, device_ids=[device], **ddp_args)
         if dist_model is not None:
             dist_model = torch.nn.parallel.DistributedDataParallel(dist_model, device_ids=[device], **ddp_args)
-        if guide_model is not None:
-            guide_model = torch.nn.parallel.DistributedDataParallel(guide_model, device_ids=[device], **ddp_args)
 
     # create optimizer and scaler
     optimizer = None
@@ -269,7 +264,6 @@ def main(args):
     os.makedirs(args.checkpoint_path, exist_ok=True)
     if 'train' not in data:
         del dist_model
-        del guide_model
         evaluate(model, data, start_epoch, args)
         return
     # evaluate(model, data, start_epoch, args)
@@ -280,7 +274,7 @@ def main(args):
         if is_master(args):
             logging.info(f'Start epoch {epoch}')
         train_one_epoch(model, method, data, loss, epoch, optimizer, scaler,
-                        scheduler, dist_model, args, guide_model)
+                        scheduler, dist_model, args)
         completed_epoch = epoch + 1
 
         student_state_dict = model.module.state_dict() \

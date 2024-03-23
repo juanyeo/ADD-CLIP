@@ -59,7 +59,7 @@ def student_teacher_ensemble(student, teacher, alpha=0.5):
     return target_state_dict
 
 
-def train_one_epoch(model, method, data, loss, epoch, optimizer, scaler, scheduler, dist_model, args):
+def train_one_epoch(model, method, data, loss, epoch, optimizer, scaler, scheduler, dist_model, args, guide_model=None):
     device = torch.device(args.device)
     autocast = get_autocast(args.precision)
     cast_dtype = get_cast_dtype(args.precision)
@@ -89,7 +89,7 @@ def train_one_epoch(model, method, data, loss, epoch, optimizer, scaler, schedul
         assert args.accum_freq == 1, "accum freq disabled"
         with autocast():
             losses, batch_size, logit_scale = method(batch, model, dist_model, loss, device, cast_dtype,
-                                                     args.distributed, args)
+                                                     args.distributed, args, guide_model=guide_model)
             total_loss = sum(losses.values())
             losses["loss"] = total_loss
 
@@ -184,7 +184,16 @@ def evaluate(model, data, epoch, args):
         + f"{keys}: {values}."
     )
     # TODO save the results as plots
-    logging.info(metrics)
+    # logging.info(metrics)
+    logging.info("-----------------------------Evaluation---------------------------")
+    cnt = 0
+    for metric, score in metrics.items():
+        if cnt == 4:
+            logging.info(f'| {f" ":<64}|')
+            cnt = 0
+        logging.info(f'| {f"{metric}":<30} : {f"{score}":<30} |')
+        cnt += 1
+    logging.info("------------------------------------------------------------------")
 
     if args.save_logs:
         with open(os.path.join(args.checkpoint_path, "results.json"), "a+") as f:

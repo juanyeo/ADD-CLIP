@@ -175,7 +175,7 @@ def parse_args(args):
     parser.add_argument(
         "--train-image-root",
         type=str,
-        default="data/coco/val2017",
+        default="/data/clipssl/coco/val2017",
     )
     parser.add_argument(
         "--train-ceph-root",
@@ -185,17 +185,17 @@ def parse_args(args):
     parser.add_argument(
         "--val-image-root",
         type=str,
-        default="data/coco/val2017",
+        default="/data/clipssl/coco/val2017",
     )
     parser.add_argument(
         "--val-segm-root",
         type=str,
-        default="data/coco/annotations/panoptic_val2017",
+        default="/data/clipssl/coco/annotations/panoptic_val2017",
     )
     parser.add_argument(
         "--train-segm-root",
         type=str,
-        default="data/coco/annotations/panoptic_val2017",
+        default="/data/clipssl/coco/annotations/panoptic_val2017",
     )
     parser.add_argument(
         "--embed-path",
@@ -222,7 +222,7 @@ def parse_args(args):
     parser.add_argument(
         "--val-data",
         type=str,
-        default="data/coco/annotations/instances_val2017_100.json"
+        default="/data/clipssl/coco/annotations/instances_val2017_100.json"
     )
     parser.add_argument(
         "--dataset-type",

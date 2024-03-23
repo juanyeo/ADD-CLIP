@@ -38,39 +38,41 @@ class CLIPSelf:
 
         image_crops = torch.cat(crops_list)
         with torch.no_grad():
-            teacher_crop_features = dist_model.encode_image(image_crops, normalize=False) # [30, 512]
-            guide_crop_features = guide_model(image_crops) # [30, 768]
-        # student_roi_features = model.encode_pseudo_boxes(images, rois_list, normalize=False, extract_type=args.extract_type)
+            teacher_crop_features = dist_model.encode_image(image_crops, normalize=False)
+        student_roi_features = model.encode_pseudo_boxes(images, rois_list, normalize=False, extract_type=args.extract_type)
+
         
         '''
         28 Nov 23: extract dense features (START)
         ''' # [B, D, W, H]
         student_dense_features = model.encode_dense(images, normalize=False, keep_shape=True)
         with torch.no_grad(): # [B, HW, D]
-            guide_dense_features = guide_model.get_intermediate_layers(images, n=1)[0][:,1:,:]
+            guide_dense_features = guide_model.get_intermediate_layers(images, n=12)[11][:,1:,:]
+        # denormed_boxes = self._denormalize_boxes(rois_list, student_dense_features)
+        # student_roi_features = roi_align(student_dense_features, denormed_boxes, (1, 1), 1.0, -1, True)[..., 0, 0]
+        # if normalize: roi_features = F.normalize(roi_features, dim=-1)
         '''
         28 Nov 23: extract dense features (END)
         '''
-
+        
+        normed_student_features = F.normalize(student_roi_features, dim=-1)
         normed_teacher_features = F.normalize(teacher_crop_features, dim=-1)
-        normed_dense_features = F.normalize(student_dense_features, dim=1)
-        normed_guide_features = F.normalize(guide_dense_features, dim=2)
-        normed_guide_crop_features = F.normalize(guide_crop_features, dim=-1)
-
-        denormed_boxes = self._denormalize_boxes(rois_list, student_dense_features)
-        guided_student_features = self.get_guided_student_boxes(denormed_boxes, dense_features=normed_dense_features, guide_crop=normed_guide_crop_features, guide_features=normed_guide_features)
-        guided_student_features = F.normalize(guided_student_features, dim=-1)
-
-        # weighted_student_features = self.get_weighted_student_boxes(denormed_boxes, teacher_crop=normed_teacher_features, dense_features=normed_dense_features)
-        # weighted_student_features = F.normalize(weighted_student_features, dim=-1)
-
-        loss_cosine = 1.0 - (guided_student_features *
+        
+        loss_cosine = 1.0 - (normed_student_features *
                              normed_teacher_features).sum(-1).mean()
 
-        loss_guide = self.loss_simmap_guidance(normed_dense_features, normed_guide_features)
+        '''
+        28 Nov 23: inter crop losses (START)
+        '''
+        # Normalize
+        # normed_dense_features = F.normalize(student_dense_features, dim=1)
+        # normed_guide_features = F.normalize(guide_dense_features, dim=2)
 
-        # losses = dict(loss_cosine=loss_cosine)
-        losses = dict(loss_cosine=loss_cosine, loss_guide=loss_guide)
+        loss_guide = self.loss_simmap_guidance_mse(student_dense_features, guide_dense_features)
+        losses = dict(loss_cosine=loss_cosine*args.cosine_weight, loss_guide=loss_guide*1000)
+        # loss_inter = self.loss_inter_features(denormed_boxes, normed_dense_features)
+        #loss_inter = self.loss_inter_features_weighted(denormed_boxes, student_dense_features)
+        # losses = dict(loss_cosine=loss_cosine*args.cosine_weight, loss_inter=loss_inter)
         
         '''
         28 Nov 23: inter crop losses (END)
@@ -81,65 +83,7 @@ class CLIPSelf:
     '''
     28 Nov 23: additional functions (START)
     '''
-    def get_guided_student(self, dense_features, guide_features):
-        n_input = dense_features.shape[0]
-        guide_features_qk = torch.matmul(guide_features[:, :1, :], guide_features[:, 1:, :].transpose(1, 2)).squeeze(1)
-        guide_similarity = F.softmax(guide_features_qk, dim=1)
-
-        dense_features = dense_features.reshape(n_input, dense_features.shape[1], -1) # [2, 768, 4096]
-
-        blist = []
-        for i in range(n_input):
-            blist.append(torch.matmul(guide_similarity[i], dense_features[i].transpose(0, 1)))
-        return torch.stack(blist)
-
-    def get_guided_student_boxes(self, denormed_boxes, dense_features, guide_crop, guide_features):
-        result = [] # dense_features: [2, 512, 64, 64] # guide_features: [2, 4097, 768]
-        box_index = 0
-
-        for i in range(len(denormed_boxes)):
-            boxes_single_image = denormed_boxes[i].round().int()
-            for j in range(len(boxes_single_image)):
-                box = boxes_single_image[j]
-                # cropped_student = dense_features[i, :, box[0]:box[2], box[1]:box[3]] # [512, 64, 22]
-                cropped_student = dense_features[i, :, box[1]:box[3], box[0]:box[2]] # [512, 64, 22]
-                cropped_guide = guide_features[i].reshape(dense_features.shape[2], dense_features.shape[3], guide_features.shape[2])[box[0]:box[2], box[1]:box[3], :] 
-                cropped_guide = cropped_guide.reshape(-1, guide_features.shape[2]) # [1408, 768]
-            
-                guide_features_qk = torch.matmul(guide_crop[box_index], cropped_guide.transpose(0, 1)) # [1, 1408]
-                guide_similarity = F.softmax(guide_features_qk, dim=0).detach()
-
-                cropped_student = cropped_student.reshape(cropped_student.shape[0], -1)
-                weighted_align = torch.matmul(guide_similarity, cropped_student.transpose(0, 1)) # [1, 512]
-
-                result.append(weighted_align)
-                box_index += 1
-
-        return torch.stack(result)
-
-    def get_weighted_student_boxes(self, denormed_boxes, teacher_crop, dense_features):
-        result = [] # dense_features: [2, 512, 64, 64] # guide_features: [2, 4097, 768]
-        box_index = 0
-
-        for i in range(len(denormed_boxes)):
-            boxes_single_image = denormed_boxes[i].round().int()
-            for j in range(len(boxes_single_image)):
-                box = boxes_single_image[j]
-                # cropped_student = dense_features[i, :, box[0]:box[2], box[1]:box[3]] # [512, 64, 22]
-                cropped_student = dense_features[i, :, box[1]:box[3], box[0]:box[2]] # [512, 64, 22]
-                cropped_student = cropped_student.reshape(cropped_student.shape[0], -1)
-            
-                teacher_qk = torch.matmul(teacher_crop[box_index], cropped_student) # [1, 1408]
-                teacher_similarity = F.softmax(teacher_qk, dim=0).detach()
-
-                weighted_align = torch.matmul(teacher_similarity, cropped_student.transpose(0, 1)) # [1, 512]
-
-                result.append(weighted_align)
-                box_index += 1
-
-        return torch.stack(result)
-
-    def loss_simmap_guidance(self, dense_features, guide_features):
+    def loss_simmap_guidance_mse(self, dense_features, guide_features):
         result = 0
         n_input = dense_features.shape[0]
         
@@ -148,7 +92,47 @@ class CLIPSelf:
         for i in range(n_input):
             student_sim_map = torch.matmul(dense_features[i].T, dense_features[i])
             guide_sim_map = torch.matmul(guide_features[i].T, guide_features[i])
+            
+            # Softmax
+            student_sim_map = F.softmax(student_sim_map/0.1, dim=1)
+            guide_sim_map = F.softmax(guide_sim_map/0.1, dim=1)
+            
             result += F.mse_loss(student_sim_map, guide_sim_map)
+
+        return result / n_input
+
+    def loss_simmap_guidance_ce(self, dense_features, guide_features):
+        result = 0
+        n_input = dense_features.shape[0]
+        
+        dense_features = dense_features.reshape(n_input, dense_features.shape[1], -1) # [2, 768, 4096]
+        guide_features = guide_features.transpose(1, 2) # [2, 512, 4096]
+        for i in range(n_input):
+            student_sim_map = torch.matmul(dense_features[i].T, dense_features[i])
+            guide_sim_map = torch.matmul(guide_features[i].T, guide_features[i])
+            clip_sim_softmax = F.softmax(student_sim_map, dim=1)
+            dino_sim_softmax = F.softmax(guide_sim_map, dim=1)
+            
+            result += torch.mean(-torch.sum(dino_sim_softmax * torch.log(clip_sim_softmax), 1))
+            # result += -(dino_sim_softmax * (clip_sim_softmax).log()).sum(dim=1).mean(dim=0)
+            # result -= (dino_sim_softmax * (clip_sim_softmax + 1e-7).log()).sum()
+            # result += (dino_sim_softmax * (dino_sim_softmax / clip_sim_softmax).log()).sum()
+            
+        return result / n_input
+
+    def loss_simmap_guidance_kl(self, dense_features, guide_features):
+        result = 0
+        n_input = dense_features.shape[0]
+        
+        dense_features = dense_features.reshape(n_input, dense_features.shape[1], -1) # [2, 768, 4096]
+        guide_features = guide_features.transpose(1, 2) # [2, 512, 4096]
+        for i in range(n_input):
+            student_sim_map = torch.matmul(dense_features[i].T, dense_features[i])
+            guide_sim_map = torch.matmul(guide_features[i].T, guide_features[i])
+            clip_sim_softmax = F.softmax(student_sim_map, dim=1)
+            dino_sim_softmax = F.softmax(guide_sim_map, dim=1)
+
+            result += (dino_sim_softmax * (dino_sim_softmax / clip_sim_softmax).log()).sum(dim=1).mean(dim=0)
 
         return result / n_input
 
