@@ -1,5 +1,4 @@
-# CLIPSelf: Vision Transformer Distills Itself for Open-Vocabulary Dense Prediction
-![](clipself_method.jpg)
+# CLIP + DINO
 ## Introduction
 
 This is an official release of the paper **CLIPSelf: Vision Transformer Distills Itself for Open-Vocabulary Dense Prediction**.
@@ -9,7 +8,7 @@ This is an official release of the paper **CLIPSelf: Vision Transformer Distills
 > [Bibetex](https://github.com/wusize/CLIPSelf#citation)
 
 ## TODO
-- [x] Code and models of CLIPSelf
+- [x] Code and models of CLIPSelf + DINO
 - [x] Code and models of F-ViT
 - [ ] Support F-ViT under the [ovdet](https://github.com/wusize/ovdet) repo using MMDetection3.x
 
