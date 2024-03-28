@@ -1,4 +1,4 @@
-# CLIP + DINO
+# Alignment, Distillation and Distribution Matching: Improving CLIP with Self-Supervised Vision Transformer 
 ## Introduction
 
 This is an official release of the paper **CLIPSelf: Vision Transformer Distills Itself for Open-Vocabulary Dense Prediction**.
